@@ -3,7 +3,8 @@ name: Release
 on:
   push:
     branches:
-      - main
+      # - main
+      - test-release-flow-on-branch
 
 jobs:
   build-cli-linux-x86:
