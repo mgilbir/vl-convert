@@ -15,7 +15,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -37,7 +37,10 @@ use resvg::render;
 
 use crate::text::{vl_convert_text_runtime, USVG_OPTIONS};
 
-deno_core::extension!(vl_convert_converter_runtime, ops = [op_get_json_arg, op_read_file, op_fetch_url]);
+deno_core::extension!(
+    vl_convert_converter_runtime,
+    ops = [op_get_json_arg, op_read_file, op_fetch_url]
+);
 
 lazy_static! {
     pub static ref TOKIO_RUNTIME: tokio::runtime::Runtime =
@@ -248,9 +251,7 @@ async fn op_read_file(#[string] path: String) -> Result<String, AnyError> {
 #[op2(async)]
 #[string]
 async fn op_fetch_url(#[string] url: String) -> Result<String, AnyError> {
-    let body = reqwest::get(&url)
-        .await?
-        .text().await?;
+    let body = reqwest::get(&url).await?.text().await?;
     Ok(body)
 }
 
