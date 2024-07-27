@@ -37,7 +37,7 @@ use resvg::render;
 
 use crate::text::{vl_convert_text_runtime, USVG_OPTIONS};
 
-deno_core::extension!(vl_convert_converter_runtime, ops = [op_get_json_arg]);
+deno_core::extension!(vl_convert_converter_runtime, ops = [op_get_json_arg, op_read_file, op_fetch_url]);
 
 lazy_static! {
     pub static ref TOKIO_RUNTIME: tokio::runtime::Runtime =
@@ -238,6 +238,22 @@ fn op_get_json_arg(arg_id: i32) -> Result<String, AnyError> {
     }
 }
 
+#[op2(async)]
+#[string]
+async fn op_read_file(#[string] path: String) -> Result<String, AnyError> {
+    let file_content = tokio::fs::read_to_string(path).await?;
+    Ok(file_content)
+}
+
+#[op2(async)]
+#[string]
+async fn op_fetch_url(#[string] url: String) -> Result<String, AnyError> {
+    let body = reqwest::get(&url)
+        .await?
+        .text().await?;
+    Ok(body)
+}
+
 /// Struct that interacts directly with the Deno JavaScript runtime. Not Sendable
 struct InnerVlConverter {
     worker: MainWorker,
@@ -262,9 +278,13 @@ import('{vega_themes_url}').then((imported) => {{
 
 var op_text_width;
 var op_get_json_arg;
+var op_read_file;
+var op_fetch_url;
 import("ext:core/ops").then((imported) => {{
     op_text_width = imported.op_text_width;
     op_get_json_arg = imported.op_get_json_arg;
+    op_read_file = imported.op_read_file;
+    op_fetch_url = imported.op_fetch_url;
 }})
 "#,
                 vega_url = vega_url(),
@@ -350,7 +370,10 @@ function vegaToView(vgSpec, allowedBaseUrls, errors) {
     let runtime = vega.parse(vgSpec);
     let baseURL = 'https://vega.github.io/vega-datasets/';
     const loader = vega.loader({ mode: 'http', baseURL });
-    const originalHttp = loader.http.bind(loader);
+    const originalHttp = op_fetch_url;
+    loader.fileAccess = true;
+    loader.file = op_read_file;
+    loader.http = op_fetch_url;
 
     if (allowedBaseUrls != null) {
         loader.http = async (uri, options) => {
