@@ -317,7 +317,6 @@ mod test_vegalite_to_vega {
     fn test(
         #[values(
             VlVersion::v5_8,
-            VlVersion::v5_12,
             VlVersion::v5_13,
             VlVersion::v5_14,
             VlVersion::v5_15,
@@ -325,6 +324,7 @@ mod test_vegalite_to_vega {
             VlVersion::v5_17,
             VlVersion::v5_18,
             VlVersion::v5_19,
+            VlVersion::v5_20,
         )]
         vl_version: VlVersion,
 
@@ -363,7 +363,6 @@ mod test_vegalite_to_html_no_bundle {
     fn test(
         #[values(
             VlVersion::v5_8,
-            VlVersion::v5_12,
             VlVersion::v5_13,
             VlVersion::v5_14,
             VlVersion::v5_15,
@@ -371,6 +370,7 @@ mod test_vegalite_to_html_no_bundle {
             VlVersion::v5_17,
             VlVersion::v5_18,
             VlVersion::v5_19,
+            VlVersion::v5_20,
         )]
         vl_version: VlVersion,
 
@@ -411,7 +411,6 @@ mod test_vegalite_to_html_bundle {
     fn test(
         #[values(
             VlVersion::v5_8,
-            VlVersion::v5_12,
             VlVersion::v5_13,
             VlVersion::v5_14,
             VlVersion::v5_15,
@@ -419,6 +418,7 @@ mod test_vegalite_to_html_bundle {
             VlVersion::v5_17,
             VlVersion::v5_18,
             VlVersion::v5_19,
+            VlVersion::v5_20,
         )]
         vl_version: VlVersion,
 
@@ -654,6 +654,7 @@ mod test_png_no_theme {
         case("geoScale", 1.0),
         case("table_heatmap", 1.0),
         case("long_text_lable", 1.0),
+        case("gh_174", 1.0),
     )]
     fn test(
         name: &str,
