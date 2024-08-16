@@ -53,5 +53,6 @@ tempfile = "3.8.0"
 tiny-skia = "0.11.4"
 tokio = { version = "1.37", features = ["macros", "rt-multi-thread"] }
 ttf-parser = "0.21.1"
+url = "2.4.1"
 usvg = "0.42.0"
 zip-extract = "0.1"
