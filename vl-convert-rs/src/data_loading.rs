@@ -588,15 +588,16 @@ mod tests_load_custom_dataloader {
         let has_http_access = worker.execute_script_to_json("httpAccess").await.unwrap();
         assert_eq!(has_http_access, dl_options.clone().has_network_access);
 
+        println!("{:?}", serde_json::to_string(path).unwrap());
         let script_load_http = format!(
             r#"
-            cl.load("{path}").then(data => {{
+            cl.load({path}).then(data => {{
                 loaded_data = data;
             }}).catch(err => {{
                 throw new Error(err.message);
             }});
             "#,
-            path = path
+            path = serde_json::to_string(path).unwrap()
         );
 
         worker
