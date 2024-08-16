@@ -1047,7 +1047,6 @@ impl VlConverter {
 
         let handle = Arc::new(thread::spawn(move || {
             TOKIO_RUNTIME.block_on(async {
-                let mut inner = InnerVlConverter::try_new().await?;
                 while let Some(cmd) = receiver.next().await {
                     match cmd {
                         VlConvertCommand::VlToVg {
@@ -1056,6 +1055,7 @@ impl VlConverter {
                             responder,
                         } => {
                             let vega_spec = inner.vegalite_to_vega(&vl_spec, vl_opts).await;
+                            let mut inner = InnerVlConverter::try_new().await?;
                             responder.send(vega_spec).ok();
                         }
                         VlConvertCommand::VgToSvg {
@@ -1064,6 +1064,7 @@ impl VlConverter {
                             responder,
                         } => {
                             let svg_result = inner.vega_to_svg(&vg_spec, vg_opts).await;
+                            let mut inner = InnerVlConverter::try_new().await?;
                             responder.send(svg_result).ok();
                         }
                         VlConvertCommand::VgToSg {
@@ -1072,6 +1073,7 @@ impl VlConverter {
                             responder,
                         } => {
                             let sg_result = inner.vega_to_scenegraph(&vg_spec, vg_opts).await;
+                            let mut inner = InnerVlConverter::try_new().await?;
                             responder.send(sg_result).ok();
                         }
                         VlConvertCommand::VlToSvg {
@@ -1080,6 +1082,7 @@ impl VlConverter {
                             responder,
                         } => {
                             let svg_result = inner.vegalite_to_svg(&vl_spec, vl_opts).await;
+                            let mut inner = InnerVlConverter::try_new().await?;
                             responder.send(svg_result).ok();
                         }
                         VlConvertCommand::VlToSg {
@@ -1088,13 +1091,16 @@ impl VlConverter {
                             responder,
                         } => {
                             let sg_result = inner.vegalite_to_scenegraph(&vl_spec, vl_opts).await;
+                            let mut inner = InnerVlConverter::try_new().await?;
                             responder.send(sg_result).ok();
                         }
                         VlConvertCommand::GetLocalTz { responder } => {
+                            let mut inner = InnerVlConverter::try_new().await?;
                             let local_tz = inner.get_local_tz().await;
                             responder.send(local_tz).ok();
                         }
                         VlConvertCommand::GetThemes { responder } => {
+                            let mut inner = InnerVlConverter::try_new().await?;
                             let themes = inner.get_themes().await;
                             responder.send(themes).ok();
                         }
