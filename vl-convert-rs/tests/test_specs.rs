@@ -3,6 +3,7 @@ use rstest::rstest;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use vl_convert_rs::data_loading::DataLoadingOptions;
 use vl_convert_rs::text::register_font_directory;
 use vl_convert_rs::{VlConverter, VlVersion};
 
@@ -339,7 +340,8 @@ mod test_vegalite_to_vega {
         let mut converter = VlConverter::new();
 
         let vg_result = block_on(
-            converter.vegalite_to_vega(vl_spec, VlOpts{vl_version, ..Default::default()}
+            converter.vegalite_to_vega(vl_spec, VlOpts{vl_version, ..Default::default()},
+            Default::default()
             )
         ).ok();
 
@@ -478,13 +480,13 @@ mod test_svg {
 
         // Convert to vega first
         let vg_spec =
-            block_on(converter.vegalite_to_vega(vl_spec.clone(), VlOpts{vl_version, ..Default::default()})).unwrap();
+            block_on(converter.vegalite_to_vega(vl_spec.clone(), VlOpts{vl_version, ..Default::default()}, Default::default())).unwrap();
 
-        let svg = block_on(converter.vega_to_svg(vg_spec, Default::default())).unwrap();
+        let svg = block_on(converter.vega_to_svg(vg_spec, Default::default(), Default::default())).unwrap();
         check_svg(name, vl_version, None, &svg);
 
         // Convert directly to svg
-        let svg = block_on(converter.vegalite_to_svg(vl_spec, VlOpts{vl_version, ..Default::default()})).unwrap();
+        let svg = block_on(converter.vegalite_to_svg(vl_spec, VlOpts{vl_version, ..Default::default()}, Default::default())).unwrap();
         check_svg(name, vl_version, None, &svg);
     }
 
@@ -518,19 +520,23 @@ mod test_svg_allowed_base_url {
                 vl_version,
                 ..Default::default()
             },
+            Default::default(),
         ))
         .unwrap();
 
+        
         // Check with matching base URL
-        let allowed_base_urls = Some(vec![
-            "https://raw.githubusercontent.com/vega/vega-datasets".to_string()
-        ]);
+        let dl_options = DataLoadingOptions{
+            allowed_base_urls: ["https://raw.githubusercontent.com/vega/vega-datasets".to_string()].to_vec(),
+            ..Default::default()
+        };
+
         let svg = block_on(converter.vega_to_svg(
             vg_spec.clone(),
             VgOpts {
-                allowed_base_urls: allowed_base_urls.clone(),
                 ..Default::default()
             },
+            dl_options.clone(),
         ))
         .unwrap();
         check_svg(name, vl_version, None, &svg);
@@ -540,22 +546,25 @@ mod test_svg_allowed_base_url {
             vl_spec.clone(),
             VlOpts {
                 vl_version,
-                allowed_base_urls,
                 ..Default::default()
             },
+            dl_options.clone(),
         ))
         .unwrap();
         check_svg(name, vl_version, None, &svg);
 
         // Check for error with non-matching URL
-        let allowed_base_urls = Some(vec!["https://some-other-base".to_string()]);
+        let dl_options = DataLoadingOptions{
+            allowed_base_urls: ["https://some-other-base".to_string()].to_vec(),
+            ..Default::default()
+        };
 
         let Err(result) = block_on(converter.vega_to_svg(
             vg_spec,
             VgOpts {
-                allowed_base_urls: allowed_base_urls.clone(),
                 ..Default::default()
             },
+            dl_options.clone(),
         )) else {
             panic!("Expected error")
         };
@@ -565,9 +574,9 @@ mod test_svg_allowed_base_url {
             vl_spec,
             VlOpts {
                 vl_version,
-                allowed_base_urls: allowed_base_urls.clone(),
                 ..Default::default()
             },
+            dl_options.clone(),
         )) else {
             panic!("Expected error")
         };
@@ -606,13 +615,13 @@ mod test_scenegraph {
 
         // Convert to vega first
         let vg_spec =
-            block_on(converter.vegalite_to_vega(vl_spec.clone(), VlOpts{vl_version, ..Default::default()})).unwrap();
+            block_on(converter.vegalite_to_vega(vl_spec.clone(), VlOpts{vl_version, ..Default::default()},Default::default())).unwrap();
 
-        let sg = block_on(converter.vega_to_scenegraph(vg_spec, Default::default())).unwrap();
+        let sg = block_on(converter.vega_to_scenegraph(vg_spec, Default::default(), Default::default())).unwrap();
         check_scenegraph(name, vl_version, None, &sg);
 
         // Convert directly to svg
-        let sg = block_on(converter.vegalite_to_scenegraph(vl_spec, VlOpts{vl_version, ..Default::default()})).unwrap();
+        let sg = block_on(converter.vegalite_to_scenegraph(vl_spec, VlOpts{vl_version, ..Default::default()},Default::default())).unwrap();
         check_scenegraph(name, vl_version, None, &sg);
     }
 
@@ -662,15 +671,15 @@ mod test_png_no_theme {
 
         // Convert to vega first
         let vg_spec = block_on(
-            converter.vegalite_to_vega(vl_spec.clone(), VlOpts{vl_version, ..Default::default()})
+            converter.vegalite_to_vega(vl_spec.clone(), VlOpts{vl_version, ..Default::default()}, Default::default())
         ).unwrap();
 
-        let png_data = block_on(converter.vega_to_png(vg_spec, Default::default(), Some(scale), None)).unwrap();
+        let png_data = block_on(converter.vega_to_png(vg_spec, Default::default(), Default::default(), Some(scale), None)).unwrap();
         check_png(name, vl_version, None, png_data.as_slice());
 
         // Convert directly to png
         let png_data = block_on(
-            converter.vegalite_to_png(vl_spec, VlOpts{vl_version, ..Default::default()}, Some(scale), None)
+            converter.vegalite_to_png(vl_spec, VlOpts{vl_version, ..Default::default()}, Default::default(), Some(scale), None)
         ).unwrap();
         check_png(name, vl_version, None, png_data.as_slice());
     }
@@ -717,10 +726,10 @@ mod test_png_theme_config {
                     theme: Some(theme.to_string()),
                     config: Some(json!({"background": BACKGROUND_COLOR})),
                     show_warnings: false,
-                    allowed_base_urls: None,
                     format_locale: None,
                     time_format_locale: None,
                 },
+                Default::default(),
                 Some(scale),
                 None
             )
@@ -743,10 +752,10 @@ mod test_png_theme_config {
                     theme: None,
                     config: Some(json!({"background": BACKGROUND_COLOR})),
                     show_warnings: false,
-                    allowed_base_urls: None,
                     format_locale: None,
                     time_format_locale: None,
                 },
+                Default::default(),
                 Some(scale),
                 None
             )
@@ -776,6 +785,7 @@ async fn test_font_with_quotes() {
                 vl_version,
                 ..Default::default()
             },
+            Default::default(),
             Some(2.0),
             None,
         )
@@ -811,6 +821,7 @@ async fn test_locale() {
                 time_format_locale: Some(TimeFormatLocale::Object(time_format_locale)),
                 ..Default::default()
             },
+            Default::default(),
             Some(2.0),
             None,
         )
@@ -831,6 +842,7 @@ async fn test_locale() {
                 )),
                 ..Default::default()
             },
+            Default::default(),
             Some(2.0),
             None,
         )
@@ -871,15 +883,15 @@ mod test_jpeg {
 
         // Convert to vega first
         let vg_spec =
-            block_on(converter.vegalite_to_vega(vl_spec.clone(), VlOpts{vl_version, ..Default::default()})).unwrap();
+            block_on(converter.vegalite_to_vega(vl_spec.clone(), VlOpts{vl_version, ..Default::default()},Default::default())).unwrap();
 
-        let jpeg_bytes = block_on(converter.vega_to_jpeg(vg_spec, Default::default(), None, None)).unwrap();
+        let jpeg_bytes = block_on(converter.vega_to_jpeg(vg_spec, Default::default(),Default::default(), None, None)).unwrap();
 
         // Check for JPEG prefix
         assert_eq!(&jpeg_bytes.as_slice()[..10], b"\xff\xd8\xff\xe0\x00\x10JFIF");
 
         // Convert directly to JPEG
-        let jpeg_bytes = block_on(converter.vegalite_to_jpeg(vl_spec, VlOpts{vl_version, ..Default::default()}, None, None)).unwrap();
+        let jpeg_bytes = block_on(converter.vegalite_to_jpeg(vl_spec, VlOpts{vl_version, ..Default::default()}, Default::default(), None, None)).unwrap();
         assert_eq!(&jpeg_bytes.as_slice()[..10], b"\xff\xd8\xff\xe0\x00\x10JFIF");
     }
 
