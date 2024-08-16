@@ -442,7 +442,7 @@ mod tests_path_sanitizer {
         let p = PathBuf::from_str("bla/foo/../../path").expect("infallible");
         let got = sanitize_path(p).unwrap();
 
-        assert_eq!(got.to_str().unwrap(), "path");
+        assert_eq!(got, PathBuf::from_str("path").unwrap());
     }
 
     #[test]
@@ -450,7 +450,7 @@ mod tests_path_sanitizer {
         let p = PathBuf::from_str("bla/foo/../../path/baz.json").expect("infallible");
         let got = sanitize_path(p).unwrap();
 
-        assert_eq!(got.to_str().unwrap(), "path/baz.json");
+        assert_eq!(got, PathBuf::from_str("path/baz.json").unwrap());
     }
 
     #[test]
@@ -458,7 +458,7 @@ mod tests_path_sanitizer {
         let p = PathBuf::from_str("/bla/foo/../path").expect("infallible");
         let got = sanitize_path(p).unwrap();
 
-        assert_eq!(got.to_str().unwrap(), "/bla/path");
+        assert_eq!(got, PathBuf::from_str("/bla/path").unwrap());
     }
 
     #[test]
