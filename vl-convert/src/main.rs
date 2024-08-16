@@ -1223,6 +1223,7 @@ async fn vg_2_svg(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn vg_2_png(
     input: &str,
     output: &str,
@@ -1289,6 +1290,7 @@ async fn vg_2_png(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn vg_2_jpeg(
     input: &str,
     output: &str,

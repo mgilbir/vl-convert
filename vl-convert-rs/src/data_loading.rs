@@ -412,12 +412,12 @@ fn sanitize_path(path: PathBuf) -> Result<PathBuf, AnyError> {
         if part == "." {
             // Skip
         } else if part.to_string_lossy() == path::MAIN_SEPARATOR.to_string()
-            && sanitized_path_parts.len() == 0
+            && sanitized_path_parts.is_empty()
         {
             sanitized_path_parts.push(part);
         } else if part == ".." {
             match sanitized_path_parts.pop() {
-                Some(ref separator)
+                Some(separator)
                     if separator.to_string_lossy() == path::MAIN_SEPARATOR.to_string() =>
                 {
                     bail!("Path traversal reaching beyond root of relative path")
@@ -430,7 +430,7 @@ fn sanitize_path(path: PathBuf) -> Result<PathBuf, AnyError> {
         }
     }
 
-    Ok(PathBuf::from_iter(sanitized_path_parts.into_iter()))
+    Ok(PathBuf::from_iter(sanitized_path_parts))
 }
 
 #[cfg(test)]
