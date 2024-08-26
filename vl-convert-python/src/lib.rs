@@ -8,6 +8,7 @@ use std::borrow::Cow;
 use std::str::FromStr;
 use std::sync::Mutex;
 use vl_convert_rs::converter::{FormatLocale, Renderer, TimeFormatLocale, VgOpts, VlOpts};
+use vl_convert_rs::data_loading::DataLoadingOptions;
 use vl_convert_rs::html::bundle_vega_snippet;
 use vl_convert_rs::module_loader::import_map::VlVersion;
 use vl_convert_rs::module_loader::{FORMATE_LOCALE_MAP, TIME_FORMATE_LOCALE_MAP};
@@ -60,6 +61,7 @@ fn vegalite_to_vega(
     let mut converter = VL_CONVERTER
         .lock()
         .expect("Failed to acquire lock on Vega-Lite converter");
+
     let vega_spec = match PYTHON_RUNTIME.block_on(converter.vegalite_to_vega(
         vl_spec,
         VlOpts {
@@ -67,10 +69,10 @@ fn vegalite_to_vega(
             config,
             theme,
             show_warnings: show_warnings.unwrap_or(false),
-            allowed_base_urls: None,
             format_locale: None,
             time_format_locale: None,
         },
+        Default::default(),
     )) {
         Ok(vega_spec) => vega_spec,
         Err(err) => {
@@ -89,23 +91,40 @@ fn vegalite_to_vega(
 ///
 /// Args:
 ///     vg_spec (str | dict): Vega JSON specification string or dict
+///     is_offline (bool): The converter runs offline without accessing the network
 ///     allowed_base_urls (list of str): List of allowed base URLs for external
 ///                                      data requests. Default allows any base URL
+///     allowed_base_datadirs (list of str): List of allowed base datadirs for external
+///                                      data requests. Default allows nothing
 ///     format_locale (str | dict): d3-format locale name or dictionary
 ///     time_format_locale (str | dict): d3-time-format locale name or dictionary
 /// Returns:
 ///     str: SVG image string
 #[pyfunction]
-#[pyo3(text_signature = "(vg_spec, allowed_base_urls, format_locale, time_format_locale)")]
+#[pyo3(
+    text_signature = "(vg_spec, is_offline, allowed_base_urls, allowed_base_datadirs, format_locale, time_format_locale)"
+)]
 fn vega_to_svg(
     vg_spec: PyObject,
+    is_offline: Option<bool>, //default: falsy
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<PyObject>,
     time_format_locale: Option<PyObject>,
 ) -> PyResult<String> {
     let vg_spec = parse_json_spec(vg_spec)?;
     let format_locale = parse_option_format_locale(format_locale)?;
     let time_format_locale = parse_option_time_format_locale(time_format_locale)?;
+
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
 
     let mut converter = VL_CONVERTER
         .lock()
@@ -114,10 +133,10 @@ fn vega_to_svg(
     let svg = match PYTHON_RUNTIME.block_on(converter.vega_to_svg(
         vg_spec,
         VgOpts {
-            allowed_base_urls,
             format_locale,
             time_format_locale,
         },
+        dl_options,
     )) {
         Ok(vega_spec) => vega_spec,
         Err(err) => {
@@ -134,23 +153,40 @@ fn vega_to_svg(
 ///
 /// Args:
 ///     vg_spec (str | dict): Vega JSON specification string or dict
+///     is_offline (bool): The converter runs offline without accessing the network
 ///     allowed_base_urls (list of str): List of allowed base URLs for external
 ///                                      data requests. Default allows any base URL
+///     allowed_base_datadirs (list of str): List of allowed base datadirs for external
+///                                      data requests. Default allows nothing
 ///     format_locale (str | dict): d3-format locale name or dictionary
 ///     time_format_locale (str | dict): d3-time-format locale name or dictionary
 /// Returns:
 ///     dict: scenegraph
 #[pyfunction]
-#[pyo3(text_signature = "(vg_spec, allowed_base_urls, format_locale, time_format_locale)")]
+#[pyo3(
+    text_signature = "(vg_spec, is_offline, allowed_base_urls, allowed_base_datadirs, format_locale, time_format_locale)"
+)]
 fn vega_to_scenegraph(
     vg_spec: PyObject,
+    is_offline: Option<bool>, //default: falsy
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<PyObject>,
     time_format_locale: Option<PyObject>,
 ) -> PyResult<PyObject> {
     let vg_spec = parse_json_spec(vg_spec)?;
     let format_locale = parse_option_format_locale(format_locale)?;
     let time_format_locale = parse_option_time_format_locale(time_format_locale)?;
+
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
 
     let mut converter = VL_CONVERTER
         .lock()
@@ -159,10 +195,10 @@ fn vega_to_scenegraph(
     let sg = match PYTHON_RUNTIME.block_on(converter.vega_to_scenegraph(
         vg_spec,
         VgOpts {
-            allowed_base_urls,
             format_locale,
             time_format_locale,
         },
+        dl_options,
     )) {
         Ok(vega_spec) => vega_spec,
         Err(err) => {
@@ -187,15 +223,18 @@ fn vega_to_scenegraph(
 ///     config (dict | None): Chart configuration object to apply during conversion
 ///     theme (str | None): Named theme (e.g. "dark") to apply during conversion
 ///     show_warnings (bool | None): Whether to print Vega-Lite compilation warnings (default false)
+///     is_offline (bool): The converter runs offline without accessing the network
 ///     allowed_base_urls (list of str): List of allowed base URLs for external
 ///                                      data requests. Default allows any base URL
+///     allowed_base_datadirs (list of str): List of allowed base datadirs for external
+///                                      data requests. Default allows nothing
 ///     format_locale (str | dict): d3-format locale name or dictionary
 ///     time_format_locale (str | dict): d3-time-format locale name or dictionary
 /// Returns:
 ///     str: SVG image string
 #[pyfunction]
 #[pyo3(
-    text_signature = "(vl_spec, vl_version, config, theme, show_warnings, allowed_base_urls, format_locale, time_format_locale)"
+    text_signature = "(vl_spec, vl_version, config, theme, show_warnings, is_offline, allowed_base_urls, allowed_base_datadirs, format_locale, time_format_locale)"
 )]
 fn vegalite_to_svg(
     vl_spec: PyObject,
@@ -203,7 +242,9 @@ fn vegalite_to_svg(
     config: Option<PyObject>,
     theme: Option<String>,
     show_warnings: Option<bool>,
+    is_offline: Option<bool>, //default: falsy
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<PyObject>,
     time_format_locale: Option<PyObject>,
 ) -> PyResult<String> {
@@ -218,6 +259,16 @@ fn vegalite_to_svg(
         Default::default()
     };
 
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
+
     let mut converter = VL_CONVERTER
         .lock()
         .expect("Failed to acquire lock on Vega-Lite converter");
@@ -229,10 +280,10 @@ fn vegalite_to_svg(
             config,
             theme,
             show_warnings: show_warnings.unwrap_or(false),
-            allowed_base_urls,
             format_locale,
             time_format_locale,
         },
+        dl_options,
     )) {
         Ok(vega_spec) => vega_spec,
         Err(err) => {
@@ -255,15 +306,18 @@ fn vegalite_to_svg(
 ///     config (dict | None): Chart configuration object to apply during conversion
 ///     theme (str | None): Named theme (e.g. "dark") to apply during conversion
 ///     show_warnings (bool | None): Whether to print Vega-Lite compilation warnings (default false)
+///     is_offline (bool): The converter runs offline without accessing the network
 ///     allowed_base_urls (list of str): List of allowed base URLs for external
 ///                                      data requests. Default allows any base URL
+///     allowed_base_datadirs (list of str): List of allowed base datadirs for external
+///                                      data requests. Default allows nothing
 ///     format_locale (str | dict): d3-format locale name or dictionary
 ///     time_format_locale (str | dict): d3-time-format locale name or dictionary
 /// Returns:
 ///     str: SVG image string
 #[pyfunction]
 #[pyo3(
-    text_signature = "(vl_spec, vl_version, config, theme, show_warnings, allowed_base_urls, format_locale, time_format_locale)"
+    text_signature = "(vl_spec, vl_version, config, theme, show_warnings, is_offline, allowed_base_urls, allowed_base_datadirs, format_locale, time_format_locale)"
 )]
 fn vegalite_to_scenegraph(
     vl_spec: PyObject,
@@ -271,7 +325,9 @@ fn vegalite_to_scenegraph(
     config: Option<PyObject>,
     theme: Option<String>,
     show_warnings: Option<bool>,
+    is_offline: Option<bool>, //default: falsy
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<PyObject>,
     time_format_locale: Option<PyObject>,
 ) -> PyResult<PyObject> {
@@ -286,6 +342,16 @@ fn vegalite_to_scenegraph(
         Default::default()
     };
 
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
+
     let mut converter = VL_CONVERTER
         .lock()
         .expect("Failed to acquire lock on Vega-Lite converter");
@@ -297,10 +363,10 @@ fn vegalite_to_scenegraph(
             config,
             theme,
             show_warnings: show_warnings.unwrap_or(false),
-            allowed_base_urls,
             format_locale,
             time_format_locale,
         },
+        dl_options,
     )) {
         Ok(vega_spec) => vega_spec,
         Err(err) => {
@@ -321,27 +387,42 @@ fn vegalite_to_scenegraph(
 ///     vg_spec (str | dict): Vega JSON specification string or dict
 ///     scale (float): Image scale factor (default 1.0)
 ///     ppi (float): Pixels per inch (default 72)
+///     is_offline (bool): The converter runs offline without accessing the network
 ///     allowed_base_urls (list of str): List of allowed base URLs for external
 ///                                      data requests. Default allows any base URL
+///     allowed_base_datadirs (list of str): List of allowed base datadirs for external
+///                                      data requests. Default allows nothing
 ///     format_locale (str | dict): d3-format locale name or dictionary
 ///     time_format_locale (str | dict): d3-time-format locale name or dictionary
 /// Returns:
 ///     bytes: PNG image data
 #[pyfunction]
 #[pyo3(
-    text_signature = "(vg_spec, scale, ppi, allowed_base_urls, format_locale, time_format_locale)"
+    text_signature = "(vg_spec, scale, ppi, is_offline, allowed_base_urls, allowed_base_datadirs, format_locale, time_format_locale)"
 )]
 fn vega_to_png(
     vg_spec: PyObject,
     scale: Option<f32>,
     ppi: Option<f32>,
+    is_offline: Option<bool>, //default: falsy
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<PyObject>,
     time_format_locale: Option<PyObject>,
 ) -> PyResult<PyObject> {
     let vg_spec = parse_json_spec(vg_spec)?;
     let format_locale = parse_option_format_locale(format_locale)?;
     let time_format_locale = parse_option_time_format_locale(time_format_locale)?;
+
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
 
     let mut converter = VL_CONVERTER
         .lock()
@@ -350,10 +431,10 @@ fn vega_to_png(
     let png_data = match PYTHON_RUNTIME.block_on(converter.vega_to_png(
         vg_spec,
         VgOpts {
-            allowed_base_urls,
             format_locale,
             time_format_locale,
         },
+        dl_options,
         scale,
         ppi,
     )) {
@@ -383,15 +464,18 @@ fn vega_to_png(
 ///     config (dict | None): Chart configuration object to apply during conversion
 ///     theme (str | None): Named theme (e.g. "dark") to apply during conversion
 ///     show_warnings (bool | None): Whether to print Vega-Lite compilation warnings (default false)
+///     is_offline (bool): The converter runs offline without accessing the network
 ///     allowed_base_urls (list of str): List of allowed base URLs for external
 ///                                      data requests. Default allows any base URL
+///     allowed_base_datadirs (list of str): List of allowed base datadirs for external
+///                                      data requests. Default allows nothing
 ///     format_locale (str | dict): d3-format locale name or dictionary
 ///     time_format_locale (str | dict): d3-time-format locale name or dictionary
 /// Returns:
 ///     bytes: PNG image data
 #[pyfunction]
 #[pyo3(
-    text_signature = "(vl_spec, vl_version, scale, ppi, config, theme, show_warnings, allowed_base_urls, format_locale, time_format_locale)"
+    text_signature = "(vl_spec, vl_version, scale, ppi, config, theme, show_warnings, is_offline, allowed_base_urls, allowed_base_datadirs, format_locale, time_format_locale)"
 )]
 fn vegalite_to_png(
     vl_spec: PyObject,
@@ -401,7 +485,9 @@ fn vegalite_to_png(
     config: Option<PyObject>,
     theme: Option<String>,
     show_warnings: Option<bool>,
+    is_offline: Option<bool>, //default: falsy
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<PyObject>,
     time_format_locale: Option<PyObject>,
 ) -> PyResult<PyObject> {
@@ -415,6 +501,16 @@ fn vegalite_to_png(
     let format_locale = parse_option_format_locale(format_locale)?;
     let time_format_locale = parse_option_time_format_locale(time_format_locale)?;
 
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
+
     let mut converter = VL_CONVERTER
         .lock()
         .expect("Failed to acquire lock on Vega-Lite converter");
@@ -426,10 +522,10 @@ fn vegalite_to_png(
             config,
             theme,
             show_warnings: show_warnings.unwrap_or(false),
-            allowed_base_urls,
             format_locale,
             time_format_locale,
         },
+        dl_options,
         scale,
         ppi,
     )) {
@@ -453,27 +549,42 @@ fn vegalite_to_png(
 ///     vg_spec (str | dict): Vega JSON specification string or dict
 ///     scale (float): Image scale factor (default 1.0)
 ///     quality (int): JPEG Quality between 0 (worst) and 100 (best). Default 90
+///     is_offline (bool): The converter runs offline without accessing the network
 ///     allowed_base_urls (list of str): List of allowed base URLs for external
 ///                                      data requests. Default allows any base URL
+///     allowed_base_datadirs (list of str): List of allowed base datadirs for external
+///                                      data requests. Default allows nothing
 ///     format_locale (str | dict): d3-format locale name or dictionary
 ///     time_format_locale (str | dict): d3-time-format locale name or dictionary
 /// Returns:
 ///     bytes: JPEG image data
 #[pyfunction]
 #[pyo3(
-    text_signature = "(vg_spec, scale, quality, allowed_base_urls, format_locale, time_format_locale)"
+    text_signature = "(vg_spec, scale, quality, is_offline, allowed_base_urls, allowed_base_datadirs, format_locale, time_format_locale)"
 )]
 fn vega_to_jpeg(
     vg_spec: PyObject,
     scale: Option<f32>,
     quality: Option<u8>,
+    is_offline: Option<bool>, //default: falsy
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<PyObject>,
     time_format_locale: Option<PyObject>,
 ) -> PyResult<PyObject> {
     let vg_spec = parse_json_spec(vg_spec)?;
     let format_locale = parse_option_format_locale(format_locale)?;
     let time_format_locale = parse_option_time_format_locale(time_format_locale)?;
+
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
 
     let mut converter = VL_CONVERTER
         .lock()
@@ -482,10 +593,10 @@ fn vega_to_jpeg(
     let jpeg_data = match PYTHON_RUNTIME.block_on(converter.vega_to_jpeg(
         vg_spec,
         VgOpts {
-            allowed_base_urls,
             format_locale,
             time_format_locale,
         },
+        dl_options,
         scale,
         quality,
     )) {
@@ -515,15 +626,18 @@ fn vega_to_jpeg(
 ///     config (dict | None): Chart configuration object to apply during conversion
 ///     theme (str | None): Named theme (e.g. "dark") to apply during conversion
 ///     show_warnings (bool | None): Whether to print Vega-Lite compilation warnings (default false)
+///     is_offline (bool): The converter runs offline without accessing the network
 ///     allowed_base_urls (list of str): List of allowed base URLs for external
 ///                                      data requests. Default allows any base URL
+///     allowed_base_datadirs (list of str): List of allowed base datadirs for external
+///                                      data requests. Default allows nothing
 ///     format_locale (str | dict): d3-format locale name or dictionary
 ///     time_format_locale (str | dict): d3-time-format locale name or dictionary
 /// Returns:
 ///     bytes: JPEG image data
 #[pyfunction]
 #[pyo3(
-    text_signature = "(vl_spec, vl_version, scale, quality, config, theme, show_warnings, allowed_base_urls, format_locale, time_format_locale)"
+    text_signature = "(vl_spec, vl_version, scale, quality, config, theme, show_warnings, is_offline, allowed_base_urls, allowed_base_datadirs, format_locale, time_format_locale)"
 )]
 fn vegalite_to_jpeg(
     vl_spec: PyObject,
@@ -533,7 +647,9 @@ fn vegalite_to_jpeg(
     config: Option<PyObject>,
     theme: Option<String>,
     show_warnings: Option<bool>,
+    is_offline: Option<bool>, //default: falsy
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<PyObject>,
     time_format_locale: Option<PyObject>,
 ) -> PyResult<PyObject> {
@@ -547,6 +663,16 @@ fn vegalite_to_jpeg(
     let format_locale = parse_option_format_locale(format_locale)?;
     let time_format_locale = parse_option_time_format_locale(time_format_locale)?;
 
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
+
     let mut converter = VL_CONVERTER
         .lock()
         .expect("Failed to acquire lock on Vega-Lite converter");
@@ -558,10 +684,10 @@ fn vegalite_to_jpeg(
             config,
             theme,
             show_warnings: show_warnings.unwrap_or(false),
-            allowed_base_urls,
             format_locale,
             time_format_locale,
         },
+        dl_options,
         scale,
         quality,
     )) {
@@ -584,18 +710,25 @@ fn vegalite_to_jpeg(
 /// Args:
 ///     vg_spec (str | dict): Vega JSON specification string or dict
 ///     scale (float): Image scale factor (default 1.0)
+///     is_offline (bool): The converter runs offline without accessing the network
 ///     allowed_base_urls (list of str): List of allowed base URLs for external
 ///                                      data requests. Default allows any base URL
+///     allowed_base_datadirs (list of str): List of allowed base datadirs for external
+///                                      data requests. Default allows nothing
 ///     format_locale (str | dict): d3-format locale name or dictionary
 ///     time_format_locale (str | dict): d3-time-format locale name or dictionary
 /// Returns:
 ///     bytes: PDF file bytes
 #[pyfunction]
-#[pyo3(text_signature = "(vg_spec, scale, allowed_base_urls, format_locale, time_format_locale)")]
+#[pyo3(
+    text_signature = "(vg_spec, scale, is_offline, allowed_base_urls, allowed_base_datadirs, format_locale, time_format_locale)"
+)]
 fn vega_to_pdf(
     vg_spec: PyObject,
     scale: Option<f32>,
+    is_offline: Option<bool>, //default: falsy
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<PyObject>,
     time_format_locale: Option<PyObject>,
 ) -> PyResult<PyObject> {
@@ -604,6 +737,16 @@ fn vega_to_pdf(
     let format_locale = parse_option_format_locale(format_locale)?;
     let time_format_locale = parse_option_time_format_locale(time_format_locale)?;
 
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
+
     let mut converter = VL_CONVERTER
         .lock()
         .expect("Failed to acquire lock on Vega-Lite converter");
@@ -611,10 +754,10 @@ fn vega_to_pdf(
     let pdf_bytes = match PYTHON_RUNTIME.block_on(converter.vega_to_pdf(
         vg_spec,
         VgOpts {
-            allowed_base_urls,
             format_locale,
             time_format_locale,
         },
+        dl_options,
     )) {
         Ok(vega_spec) => vega_spec,
         Err(err) => {
@@ -639,15 +782,18 @@ fn vega_to_pdf(
 ///     scale (float): Image scale factor (default 1.0)
 ///     config (dict | None): Chart configuration object to apply during conversion
 ///     theme (str | None): Named theme (e.g. "dark") to apply during conversion
+///     is_offline (bool): The converter runs offline without accessing the network
 ///     allowed_base_urls (list of str): List of allowed base URLs for external
 ///                                      data requests. Default allows any base URL
+///     allowed_base_datadirs (list of str): List of allowed base datadirs for external
+///                                      data requests. Default allows nothing
 ///     format_locale (str | dict): d3-format locale name or dictionary
 ///     time_format_locale (str | dict): d3-time-format locale name or dictionary
 /// Returns:
 ///     bytes: PDF image data
 #[pyfunction]
 #[pyo3(
-    text_signature = "(vl_spec, vl_version, scale, config, theme, allowed_base_urls, format_locale, time_format_locale)"
+    text_signature = "(vl_spec, vl_version, scale, config, theme, is_offline, allowed_base_urls, allowed_base_datadirs, format_locale, time_format_locale)"
 )]
 fn vegalite_to_pdf(
     vl_spec: PyObject,
@@ -655,7 +801,9 @@ fn vegalite_to_pdf(
     scale: Option<f32>,
     config: Option<PyObject>,
     theme: Option<String>,
+    is_offline: Option<bool>, //default: falsy
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<PyObject>,
     time_format_locale: Option<PyObject>,
 ) -> PyResult<PyObject> {
@@ -670,6 +818,16 @@ fn vegalite_to_pdf(
     let format_locale = parse_option_format_locale(format_locale)?;
     let time_format_locale = parse_option_time_format_locale(time_format_locale)?;
 
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
+
     let mut converter = VL_CONVERTER
         .lock()
         .expect("Failed to acquire lock on Vega-Lite converter");
@@ -681,10 +839,10 @@ fn vegalite_to_pdf(
             config,
             theme,
             show_warnings: false,
-            allowed_base_urls,
             format_locale,
             time_format_locale,
         },
+        dl_options,
     )) {
         Ok(vega_spec) => vega_spec,
         Err(err) => {
@@ -786,7 +944,6 @@ fn vegalite_to_html(
             config,
             theme,
             show_warnings: false,
-            allowed_base_urls: None,
             format_locale,
             time_format_locale,
         },
@@ -826,7 +983,6 @@ fn vega_to_html(
     Ok(PYTHON_RUNTIME.block_on(converter.vega_to_html(
         vg_spec,
         VgOpts {
-            allowed_base_urls: None,
             format_locale,
             time_format_locale,
         },

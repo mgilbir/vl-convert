@@ -33,6 +33,7 @@ async fn main() {
                 vl_version: VlVersion::v5_8,
                 ..Default::default()
             },
+            Default::default(),
         )
         .await
         .expect("Failed to perform Vega-Lite to Vega conversion");
