@@ -1,22 +1,15 @@
 use crate::module_loader::import_map::{url_for_path, vega_themes_url, vega_url, VlVersion};
-use crate::module_loader::{
-    VlConvertModuleLoader, FORMATE_LOCALE_MAP, IMPORT_MAP, TIME_FORMATE_LOCALE_MAP,
-};
+use crate::module_loader::{FORMATE_LOCALE_MAP, IMPORT_MAP, TIME_FORMATE_LOCALE_MAP};
+use crate::{data_loading, jsworker};
 
 use deno_core::op2;
 use deno_runtime::deno_core;
 use deno_runtime::deno_core::anyhow::bail;
 use deno_runtime::deno_core::error::AnyError;
-use deno_runtime::deno_core::{serde_v8, v8};
-use deno_runtime::deno_permissions::{Permissions, PermissionsContainer};
-use deno_runtime::worker::MainWorker;
-use deno_runtime::worker::WorkerOptions;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
-use std::path::Path;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use std::panic;
@@ -36,6 +29,7 @@ use image::codecs::jpeg::JpegEncoder;
 use image::io::Reader as ImageReader;
 use resvg::render;
 
+use crate::data_loading::{vl_convert_data_loader_runtime, DataLoadingOptions};
 use crate::text::{vl_convert_text_runtime, USVG_OPTIONS};
 
 deno_core::extension!(vl_convert_converter_runtime, ops = [op_get_json_arg]);
@@ -52,7 +46,6 @@ lazy_static! {
 
 #[derive(Debug, Clone, Default)]
 pub struct VgOpts {
-    pub allowed_base_urls: Option<Vec<String>>,
     pub format_locale: Option<FormatLocale>,
     pub time_format_locale: Option<TimeFormatLocale>,
 }
@@ -157,7 +150,6 @@ pub struct VlOpts {
     pub theme: Option<String>,
     pub vl_version: VlVersion,
     pub show_warnings: bool,
-    pub allowed_base_urls: Option<Vec<String>>,
     pub format_locale: Option<FormatLocale>,
     pub time_format_locale: Option<TimeFormatLocale>,
 }
@@ -241,7 +233,7 @@ fn op_get_json_arg(arg_id: i32) -> Result<String, AnyError> {
 
 /// Struct that interacts directly with the Deno JavaScript runtime. Not Sendable
 struct InnerVlConverter {
-    worker: MainWorker,
+    worker: jsworker::Worker,
     initialized_vl_versions: HashSet<VlVersion>,
     vega_initialized: bool,
 }
@@ -267,6 +259,7 @@ import("ext:core/ops").then((imported) => {{
     op_text_width = imported.op_text_width;
     op_get_json_arg = imported.op_get_json_arg;
 }})
+var errors = [];
 "#,
                 vega_url = vega_url(),
                 vega_themes_url = vega_themes_url(),
@@ -345,40 +338,30 @@ import('{url}').then((sg) => {{
                 }
             }
 
+            // Create and initialize data loader functions
+            self.worker.execute_script(
+                "ext:<anon>",
+                deno_core::FastString::from_static(&data_loading::DATALOADER_JS_SCRIPT),
+            )?;
+            self.worker.run_event_loop(false).await?;
+
             // Create and initialize svg function string
             let function_str = r#"
-function vegaToView(vgSpec, allowedBaseUrls, errors) {
+function vegaToView(vgSpec, errors) {
     let runtime = vega.parse(vgSpec);
-    let baseURL = 'https://vega.github.io/vega-datasets/';
-    const loader = vega.loader({ mode: 'http', baseURL });
-    const originalHttp = loader.http.bind(loader);
-
-    if (allowedBaseUrls != null) {
-        loader.http = async (uri, options) => {
-            const parsedUri = new URL(uri);
-            if (
-                allowedBaseUrls.every(
-                    (allowedUrl) => !parsedUri.href.startsWith(allowedUrl),
-                )
-            ) {
-                errors.push(`External data url not allowed: ${uri}`);
-                throw new Error(`External data url not allowed: ${uri}`);
-            }
-            return originalHttp(uri, options);
-        };
-    }
+    const loader = custom_loader();
 
     return new vega.View(runtime, {renderer: 'none', loader});
 }
 
-function vegaToSvg(vgSpec, allowedBaseUrls, formatLocale, timeFormatLocale, errors) {
+function vegaToSvg(vgSpec, formatLocale, timeFormatLocale, errors) {
     if (formatLocale != null) {
         vega.formatLocale(formatLocale);
     }
     if (timeFormatLocale != null) {
         vega.timeFormatLocale(timeFormatLocale);
     }
-    let view = vegaToView(vgSpec, allowedBaseUrls, errors);
+    let view = vegaToView(vgSpec, errors);
     let svgPromise = view.runAsync().then(() => {
         try {
             // Workaround for https://github.com/vega/vega/issues/3481
@@ -455,14 +438,14 @@ function cloneScenegraph(obj) {
     return clone;
 }
 
-function vegaToScenegraph(vgSpec, allowedBaseUrls, formatLocale, timeFormatLocale, errors) {
+function vegaToScenegraph(vgSpec, formatLocale, timeFormatLocale, errors) {
     if (formatLocale != null) {
         vega.formatLocale(formatLocale);
     }
     if (timeFormatLocale != null) {
         vega.timeFormatLocale(timeFormatLocale);
     }
-    let view = vegaToView(vgSpec, allowedBaseUrls, errors);
+    let view = vegaToView(vgSpec, errors);
     let scenegraphPromise = view.runAsync().then(() => {
         try {
             // Workaround for https://github.com/vega/vega/issues/3481
@@ -545,14 +528,14 @@ function compileVegaLite_{ver_name}(vlSpec, config, theme, warnings) {{
     return {ver_name}.compile(vlSpec, options).spec
 }}
 
-function vegaLiteToSvg_{ver_name}(vlSpec, config, theme, warnings, allowedBaseUrls, formatLocale, timeFormatLocale, errors) {{
+function vegaLiteToSvg_{ver_name}(vlSpec, config, theme, warnings, formatLocale, timeFormatLocale, errors) {{
     let vgSpec = compileVegaLite_{ver_name}(vlSpec, config, theme, warnings);
-    return vegaToSvg(vgSpec, allowedBaseUrls, formatLocale, timeFormatLocale, errors)
+    return vegaToSvg(vgSpec, formatLocale, timeFormatLocale, errors)
 }}
 
-function vegaLiteToScenegraph_{ver_name}(vlSpec, config, theme, warnings, allowedBaseUrls, formatLocale, timeFormatLocale, errors) {{
+function vegaLiteToScenegraph_{ver_name}(vlSpec, config, theme, warnings, formatLocale, timeFormatLocale, errors) {{
     let vgSpec = compileVegaLite_{ver_name}(vlSpec, config, theme, warnings);
-    return vegaToScenegraph(vgSpec, allowedBaseUrls,formatLocale, timeFormatLocale,  errors)
+    return vegaToScenegraph(vgSpec, formatLocale, timeFormatLocale,  errors)
 }}
 "#,
                 ver_name = format!("{:?}", vl_version),
@@ -570,26 +553,13 @@ function vegaLiteToScenegraph_{ver_name}(vlSpec, config, theme, warnings, allowe
     }
 
     pub async fn try_new() -> Result<Self, AnyError> {
-        let module_loader = Rc::new(VlConvertModuleLoader);
-        let options = WorkerOptions {
-            extensions: vec![
-                vl_convert_text_runtime::init_ops(),
-                vl_convert_converter_runtime::init_ops(),
-            ],
-            module_loader: module_loader.clone(),
-            ..Default::default()
-        };
+        let extensions = vec![
+            vl_convert_text_runtime::init_ops(),
+            vl_convert_converter_runtime::init_ops(),
+            vl_convert_data_loader_runtime::init_ops(),
+        ];
 
-        let main_module =
-            deno_core::resolve_path("vl-convert-rs.js", Path::new(env!("CARGO_MANIFEST_DIR")))?;
-
-        let permissions = PermissionsContainer::new(Permissions::allow_all());
-
-        let mut worker =
-            MainWorker::bootstrap_from_options(main_module.clone(), permissions, options);
-
-        worker.execute_main_module(&main_module).await?;
-        worker.run_event_loop(false).await?;
+        let worker = jsworker::Worker::try_new(extensions).await?;
 
         let this = Self {
             worker,
@@ -600,58 +570,13 @@ function vegaLiteToScenegraph_{ver_name}(vlSpec, config, theme, warnings, allowe
         Ok(this)
     }
 
-    async fn execute_script_to_json(
-        &mut self,
-        script: &str,
-    ) -> Result<serde_json::Value, AnyError> {
-        let code = script.to_string();
-        let res = self.worker.js_runtime.execute_script("ext:<anon>", code)?;
-
-        self.worker.run_event_loop(false).await?;
-
-        let scope = &mut self.worker.js_runtime.handle_scope();
-        let local = v8::Local::new(scope, res);
-
-        // Deserialize a `v8` object into a Rust type using `serde_v8`,
-        // in this case deserialize to a JSON `Value`.
-        let deserialized_value = serde_v8::from_v8::<serde_json::Value>(scope, local);
-        deserialized_value.map_err(|err| {
-            anyhow!(
-                "Failed to deserialize JavaScript value: {}",
-                err.to_string()
-            )
-        })
-    }
-
-    async fn execute_script_to_string(&mut self, script: &str) -> Result<String, AnyError> {
-        let code = script.to_string();
-        let res = self.worker.js_runtime.execute_script("ext:<anon>", code)?;
-
-        self.worker.run_event_loop(false).await?;
-
-        let scope = &mut self.worker.js_runtime.handle_scope();
-        let local = v8::Local::new(scope, res);
-
-        // Deserialize a `v8` object into a Rust type using `serde_v8`,
-        // in this case deserialize to a JSON `Value`.
-        let deserialized_value = serde_v8::from_v8::<serde_json::Value>(scope, local);
-
-        let value = match deserialized_value {
-            Ok(value) => {
-                let value = value.as_str();
-                value.unwrap().to_string()
-            }
-            Err(err) => bail!("{}", err.to_string()),
-        };
-
-        Ok(value)
-    }
-
     pub async fn vegalite_to_vega(
         &mut self,
         vl_spec: &serde_json::Value,
         vl_opts: VlOpts,
+        dl_opts: DataLoadingOptions,
     ) -> Result<serde_json::Value, AnyError> {
+        self.worker.init_dataloader(dl_opts).await?;
         self.init_vega().await?;
         self.init_vl_version(&vl_opts.vl_version).await?;
         let config = vl_opts.config.clone().unwrap_or(serde_json::Value::Null);
@@ -664,9 +589,6 @@ function vegaLiteToScenegraph_{ver_name}(vlSpec, config, theme, warnings, allowe
             Some(s) => format!("'{}'", s),
         };
 
-        let allowed_base_urls =
-            serde_json::to_string(&serde_json::Value::from(vl_opts.allowed_base_urls))?;
-
         let code = format!(
             r#"
 compileVegaLite_{ver_name:?}(
@@ -674,7 +596,6 @@ compileVegaLite_{ver_name:?}(
     JSON.parse(op_get_json_arg({config_arg_id})),
     {theme_arg},
     {show_warnings},
-    {allowed_base_urls},
 )
 "#,
             ver_name = vl_opts.vl_version,
@@ -684,7 +605,7 @@ compileVegaLite_{ver_name:?}(
             show_warnings = vl_opts.show_warnings,
         );
 
-        let value = self.execute_script_to_json(&code).await?;
+        let value = self.worker.execute_script_to_json(&code).await?;
         Ok(value)
     }
 
@@ -692,7 +613,9 @@ compileVegaLite_{ver_name:?}(
         &mut self,
         vl_spec: &serde_json::Value,
         vl_opts: VlOpts,
+        dl_opts: DataLoadingOptions,
     ) -> Result<String, AnyError> {
+        self.worker.init_dataloader(dl_opts).await?;
         self.init_vega().await?;
         self.init_vl_version(&vl_opts.vl_version).await?;
 
@@ -718,19 +641,14 @@ compileVegaLite_{ver_name:?}(
             Some(s) => format!("'{}'", s),
         };
 
-        let allowed_base_urls =
-            serde_json::to_string(&serde_json::Value::from(vl_opts.allowed_base_urls))?;
-
         let code = format!(
             r#"
 var svg;
-var errors = [];
 vegaLiteToSvg_{ver_name:?}(
     JSON.parse(op_get_json_arg({spec_arg_id})),
     JSON.parse(op_get_json_arg({config_arg_id})),
     {theme_arg},
     {show_warnings},
-    {allowed_base_urls},
     JSON.parse(op_get_json_arg({format_locale_id})),
     JSON.parse(op_get_json_arg({time_format_locale_id})),
     errors,
@@ -747,7 +665,7 @@ vegaLiteToSvg_{ver_name:?}(
         self.worker.execute_script("ext:<anon>", code.into())?;
         self.worker.run_event_loop(false).await?;
 
-        let value = self.execute_script_to_string("svg").await?;
+        let value = self.worker.execute_script_to_string("svg").await?;
         Ok(value)
     }
 
@@ -755,7 +673,9 @@ vegaLiteToSvg_{ver_name:?}(
         &mut self,
         vl_spec: &serde_json::Value,
         vl_opts: VlOpts,
+        dl_opts: DataLoadingOptions,
     ) -> Result<serde_json::Value, AnyError> {
+        self.worker.init_dataloader(dl_opts).await?;
         self.init_vega().await?;
         self.init_vl_version(&vl_opts.vl_version).await?;
 
@@ -780,19 +700,14 @@ vegaLiteToSvg_{ver_name:?}(
             Some(s) => format!("'{}'", s),
         };
 
-        let allowed_base_urls =
-            serde_json::to_string(&serde_json::Value::from(vl_opts.allowed_base_urls))?;
-
         let code = format!(
             r#"
 var sg;
-var errors = [];
 vegaLiteToScenegraph_{ver_name:?}(
     JSON.parse(op_get_json_arg({spec_arg_id})),
     JSON.parse(op_get_json_arg({config_arg_id})),
     {theme_arg},
     {show_warnings},
-    {allowed_base_urls},
     JSON.parse(op_get_json_arg({format_locale_id})),
     JSON.parse(op_get_json_arg({time_format_locale_id})),
     errors,
@@ -809,7 +724,7 @@ vegaLiteToScenegraph_{ver_name:?}(
         self.worker.execute_script("ext:<anon>", code.into())?;
         self.worker.run_event_loop(false).await?;
 
-        let value = self.execute_script_to_json("sg").await?;
+        let value = self.worker.execute_script_to_json("sg").await?;
         Ok(value)
     }
 
@@ -817,11 +732,10 @@ vegaLiteToScenegraph_{ver_name:?}(
         &mut self,
         vg_spec: &serde_json::Value,
         vg_opts: VgOpts,
+        dl_opts: DataLoadingOptions,
     ) -> Result<String, AnyError> {
+        self.worker.init_dataloader(dl_opts).await?;
         self.init_vega().await?;
-        let allowed_base_urls =
-            serde_json::to_string(&serde_json::Value::from(vg_opts.allowed_base_urls))?;
-
         let format_locale = match vg_opts.format_locale {
             None => serde_json::Value::Null,
             Some(fl) => fl.as_object()?,
@@ -839,10 +753,8 @@ vegaLiteToScenegraph_{ver_name:?}(
         let code = format!(
             r#"
 var svg;
-var errors = [];
 vegaToSvg(
     JSON.parse(op_get_json_arg({arg_id})),
-    {allowed_base_urls},
     JSON.parse(op_get_json_arg({format_locale_id})),
     JSON.parse(op_get_json_arg({time_format_locale_id})),
     errors,
@@ -857,7 +769,7 @@ vegaToSvg(
         self.worker.execute_script("ext:<anon>", code.into())?;
         self.worker.run_event_loop(false).await?;
 
-        let value = self.execute_script_to_string("svg").await?;
+        let value = self.worker.execute_script_to_string("svg").await?;
         Ok(value)
     }
 
@@ -865,10 +777,10 @@ vegaToSvg(
         &mut self,
         vg_spec: &serde_json::Value,
         vg_opts: VgOpts,
+        dl_opts: DataLoadingOptions,
     ) -> Result<serde_json::Value, AnyError> {
+        self.worker.init_dataloader(dl_opts).await?;
         self.init_vega().await?;
-        let allowed_base_urls =
-            serde_json::to_string(&serde_json::Value::from(vg_opts.allowed_base_urls))?;
         let format_locale = match vg_opts.format_locale {
             None => serde_json::Value::Null,
             Some(fl) => fl.as_object()?,
@@ -886,10 +798,8 @@ vegaToSvg(
         let code = format!(
             r#"
 var sg;
-var errors = [];
 vegaToScenegraph(
     JSON.parse(op_get_json_arg({arg_id})),
-    {allowed_base_urls},
     JSON.parse(op_get_json_arg({format_locale_id})),
     JSON.parse(op_get_json_arg({time_format_locale_id})),
     errors,
@@ -904,7 +814,7 @@ vegaToScenegraph(
         self.worker.execute_script("ext:<anon>", code.into())?;
         self.worker.run_event_loop(false).await?;
 
-        let value = self.execute_script_to_json("sg").await?;
+        let value = self.worker.execute_script_to_json("sg").await?;
         Ok(value)
     }
 
@@ -914,7 +824,7 @@ vegaToScenegraph(
         self.worker.execute_script("ext:<anon>", code.into())?;
         self.worker.run_event_loop(false).await?;
 
-        let value = self.execute_script_to_string("localTz").await?;
+        let value = self.worker.execute_script_to_string("localTz").await?;
         if value == "undefined" {
             Ok(None)
         } else {
@@ -923,6 +833,7 @@ vegaToScenegraph(
     }
 
     pub async fn get_themes(&mut self) -> Result<serde_json::Value, AnyError> {
+        self.worker.init_dataloader(Default::default()).await?;
         self.init_vega().await?;
 
         let code = r#"
@@ -935,7 +846,7 @@ delete themes.default
         self.worker.execute_script("ext:<anon>", code.into())?;
         self.worker.run_event_loop(false).await?;
 
-        let value = self.execute_script_to_json("themes").await?;
+        let value = self.worker.execute_script_to_json("themes").await?;
         Ok(value)
     }
 }
@@ -944,26 +855,31 @@ pub enum VlConvertCommand {
     VlToVg {
         vl_spec: serde_json::Value,
         vl_opts: VlOpts,
+        dl_opts: DataLoadingOptions,
         responder: oneshot::Sender<Result<serde_json::Value, AnyError>>,
     },
     VgToSvg {
         vg_spec: serde_json::Value,
         vg_opts: VgOpts,
+        dl_opts: DataLoadingOptions,
         responder: oneshot::Sender<Result<String, AnyError>>,
     },
     VgToSg {
         vg_spec: serde_json::Value,
         vg_opts: VgOpts,
+        dl_opts: DataLoadingOptions,
         responder: oneshot::Sender<Result<serde_json::Value, AnyError>>,
     },
     VlToSvg {
         vl_spec: serde_json::Value,
         vl_opts: VlOpts,
+        dl_opts: DataLoadingOptions,
         responder: oneshot::Sender<Result<String, AnyError>>,
     },
     VlToSg {
         vl_spec: serde_json::Value,
         vl_opts: VlOpts,
+        dl_opts: DataLoadingOptions,
         responder: oneshot::Sender<Result<serde_json::Value, AnyError>>,
     },
     GetLocalTz {
@@ -1001,7 +917,7 @@ pub enum VlConvertCommand {
 /// }   "#).unwrap();
 ///
 ///     let vega_spec = futures::executor::block_on(
-///         converter.vegalite_to_vega(vl_spec, Default::default())
+///         converter.vegalite_to_vega(vl_spec, Default::default(), Default::default())
 ///     ).expect(
 ///         "Failed to perform Vega-Lite to Vega conversion"
 ///     );
@@ -1024,54 +940,70 @@ impl VlConverter {
 
         let handle = Arc::new(thread::spawn(move || {
             TOKIO_RUNTIME.block_on(async {
-                let mut inner = InnerVlConverter::try_new().await?;
                 while let Some(cmd) = receiver.next().await {
                     match cmd {
                         VlConvertCommand::VlToVg {
                             vl_spec,
                             vl_opts,
+                            dl_opts,
                             responder,
                         } => {
-                            let vega_spec = inner.vegalite_to_vega(&vl_spec, vl_opts).await;
+                            let mut inner = InnerVlConverter::try_new().await?;
+                            let vega_spec =
+                                inner.vegalite_to_vega(&vl_spec, vl_opts, dl_opts).await;
                             responder.send(vega_spec).ok();
                         }
                         VlConvertCommand::VgToSvg {
                             vg_spec,
                             vg_opts,
+                            dl_opts,
                             responder,
                         } => {
-                            let svg_result = inner.vega_to_svg(&vg_spec, vg_opts).await;
+                            let mut inner = InnerVlConverter::try_new().await?;
+                            let svg_result = inner.vega_to_svg(&vg_spec, vg_opts, dl_opts).await;
                             responder.send(svg_result).ok();
                         }
                         VlConvertCommand::VgToSg {
                             vg_spec,
                             vg_opts,
+                            dl_opts,
                             responder,
                         } => {
-                            let sg_result = inner.vega_to_scenegraph(&vg_spec, vg_opts).await;
+                            let mut inner = InnerVlConverter::try_new().await?;
+                            let sg_result =
+                                inner.vega_to_scenegraph(&vg_spec, vg_opts, dl_opts).await;
                             responder.send(sg_result).ok();
                         }
                         VlConvertCommand::VlToSvg {
                             vl_spec,
                             vl_opts,
+                            dl_opts,
                             responder,
                         } => {
-                            let svg_result = inner.vegalite_to_svg(&vl_spec, vl_opts).await;
+                            let mut inner = InnerVlConverter::try_new().await?;
+                            let svg_result =
+                                inner.vegalite_to_svg(&vl_spec, vl_opts, dl_opts).await;
                             responder.send(svg_result).ok();
                         }
                         VlConvertCommand::VlToSg {
                             vl_spec,
                             vl_opts,
+                            dl_opts,
                             responder,
                         } => {
-                            let sg_result = inner.vegalite_to_scenegraph(&vl_spec, vl_opts).await;
+                            let mut inner = InnerVlConverter::try_new().await?;
+                            let sg_result = inner
+                                .vegalite_to_scenegraph(&vl_spec, vl_opts, dl_opts)
+                                .await;
                             responder.send(sg_result).ok();
                         }
                         VlConvertCommand::GetLocalTz { responder } => {
+                            let mut inner = InnerVlConverter::try_new().await?;
                             let local_tz = inner.get_local_tz().await;
                             responder.send(local_tz).ok();
                         }
                         VlConvertCommand::GetThemes { responder } => {
+                            let mut inner = InnerVlConverter::try_new().await?;
                             let themes = inner.get_themes().await;
                             responder.send(themes).ok();
                         }
@@ -1094,11 +1026,13 @@ impl VlConverter {
         &mut self,
         vl_spec: serde_json::Value,
         vl_opts: VlOpts,
+        dl_opts: DataLoadingOptions,
     ) -> Result<serde_json::Value, AnyError> {
         let (resp_tx, resp_rx) = oneshot::channel::<Result<serde_json::Value, AnyError>>();
         let cmd = VlConvertCommand::VlToVg {
             vl_spec,
             vl_opts,
+            dl_opts,
             responder: resp_tx,
         };
 
@@ -1123,11 +1057,13 @@ impl VlConverter {
         &mut self,
         vg_spec: serde_json::Value,
         vg_opts: VgOpts,
+        dl_opts: DataLoadingOptions,
     ) -> Result<String, AnyError> {
         let (resp_tx, resp_rx) = oneshot::channel::<Result<String, AnyError>>();
         let cmd = VlConvertCommand::VgToSvg {
             vg_spec,
             vg_opts,
+            dl_opts,
             responder: resp_tx,
         };
 
@@ -1152,11 +1088,13 @@ impl VlConverter {
         &mut self,
         vg_spec: serde_json::Value,
         vg_opts: VgOpts,
+        dl_opts: DataLoadingOptions,
     ) -> Result<serde_json::Value, AnyError> {
         let (resp_tx, resp_rx) = oneshot::channel::<Result<serde_json::Value, AnyError>>();
         let cmd = VlConvertCommand::VgToSg {
             vg_spec,
             vg_opts,
+            dl_opts,
             responder: resp_tx,
         };
 
@@ -1184,11 +1122,13 @@ impl VlConverter {
         &mut self,
         vl_spec: serde_json::Value,
         vl_opts: VlOpts,
+        dl_opts: DataLoadingOptions,
     ) -> Result<String, AnyError> {
         let (resp_tx, resp_rx) = oneshot::channel::<Result<String, AnyError>>();
         let cmd = VlConvertCommand::VlToSvg {
             vl_spec,
             vl_opts,
+            dl_opts,
             responder: resp_tx,
         };
 
@@ -1213,11 +1153,13 @@ impl VlConverter {
         &mut self,
         vl_spec: serde_json::Value,
         vl_opts: VlOpts,
+        dl_opts: DataLoadingOptions,
     ) -> Result<serde_json::Value, AnyError> {
         let (resp_tx, resp_rx) = oneshot::channel::<Result<serde_json::Value, AnyError>>();
         let cmd = VlConvertCommand::VlToSg {
             vl_spec,
             vl_opts,
+            dl_opts,
             responder: resp_tx,
         };
 
@@ -1245,11 +1187,12 @@ impl VlConverter {
         &mut self,
         vg_spec: serde_json::Value,
         vg_opts: VgOpts,
+        dl_opts: DataLoadingOptions,
         scale: Option<f32>,
         ppi: Option<f32>,
     ) -> Result<Vec<u8>, AnyError> {
         let scale = scale.unwrap_or(1.0);
-        let svg = self.vega_to_svg(vg_spec, vg_opts).await?;
+        let svg = self.vega_to_svg(vg_spec, vg_opts, dl_opts).await?;
         svg_to_png(&svg, scale, ppi)
     }
 
@@ -1257,11 +1200,12 @@ impl VlConverter {
         &mut self,
         vl_spec: serde_json::Value,
         vl_opts: VlOpts,
+        dl_opts: DataLoadingOptions,
         scale: Option<f32>,
         ppi: Option<f32>,
     ) -> Result<Vec<u8>, AnyError> {
         let scale = scale.unwrap_or(1.0);
-        let svg = self.vegalite_to_svg(vl_spec, vl_opts).await?;
+        let svg = self.vegalite_to_svg(vl_spec, vl_opts, dl_opts).await?;
         svg_to_png(&svg, scale, ppi)
     }
 
@@ -1269,11 +1213,12 @@ impl VlConverter {
         &mut self,
         vg_spec: serde_json::Value,
         vg_opts: VgOpts,
+        dl_opts: DataLoadingOptions,
         scale: Option<f32>,
         quality: Option<u8>,
     ) -> Result<Vec<u8>, AnyError> {
         let scale = scale.unwrap_or(1.0);
-        let svg = self.vega_to_svg(vg_spec, vg_opts).await?;
+        let svg = self.vega_to_svg(vg_spec, vg_opts, dl_opts).await?;
         svg_to_jpeg(&svg, scale, quality)
     }
 
@@ -1281,11 +1226,12 @@ impl VlConverter {
         &mut self,
         vl_spec: serde_json::Value,
         vl_opts: VlOpts,
+        dl_opts: DataLoadingOptions,
         scale: Option<f32>,
         quality: Option<u8>,
     ) -> Result<Vec<u8>, AnyError> {
         let scale = scale.unwrap_or(1.0);
-        let svg = self.vegalite_to_svg(vl_spec, vl_opts).await?;
+        let svg = self.vegalite_to_svg(vl_spec, vl_opts, dl_opts).await?;
         svg_to_jpeg(&svg, scale, quality)
     }
 
@@ -1293,8 +1239,9 @@ impl VlConverter {
         &mut self,
         vg_spec: serde_json::Value,
         vg_opts: VgOpts,
+        dl_opts: DataLoadingOptions,
     ) -> Result<Vec<u8>, AnyError> {
-        let svg = self.vega_to_svg(vg_spec, vg_opts).await?;
+        let svg = self.vega_to_svg(vg_spec, vg_opts, dl_opts).await?;
         svg_to_pdf(&svg)
     }
 
@@ -1302,8 +1249,9 @@ impl VlConverter {
         &mut self,
         vl_spec: serde_json::Value,
         vl_opts: VlOpts,
+        dl_opts: DataLoadingOptions,
     ) -> Result<Vec<u8>, AnyError> {
-        let svg = self.vegalite_to_svg(vl_spec, vl_opts).await?;
+        let svg = self.vegalite_to_svg(vl_spec, vl_opts, dl_opts).await?;
         svg_to_pdf(&svg)
     }
 
@@ -1640,6 +1588,7 @@ mod tests {
                     vl_version: VlVersion::v5_16,
                     ..Default::default()
                 },
+                Default::default(),
             )
             .await
             .unwrap();
@@ -1667,6 +1616,7 @@ mod tests {
                     vl_version: VlVersion::v5_16,
                     ..Default::default()
                 },
+                DataLoadingOptions::default(),
             )
             .await
             .unwrap();
@@ -1680,6 +1630,7 @@ mod tests {
                     vl_version: VlVersion::v5_8,
                     ..Default::default()
                 },
+                DataLoadingOptions::default(),
             )
             .await
             .unwrap();

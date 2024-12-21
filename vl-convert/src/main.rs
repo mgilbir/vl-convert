@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 
-use clap::{arg, Parser, Subcommand};
+use clap::{arg, ArgAction, Parser, Subcommand};
 use itertools::Itertools;
 use std::path::Path;
 use std::str::FromStr;
@@ -8,6 +8,7 @@ use vl_convert_rs::converter::{
     vega_to_url, vegalite_to_url, FormatLocale, Renderer, TimeFormatLocale, VgOpts, VlConverter,
     VlOpts,
 };
+use vl_convert_rs::data_loading::DataLoadingOptions;
 use vl_convert_rs::module_loader::import_map::VlVersion;
 use vl_convert_rs::text::register_font_directory;
 use vl_convert_rs::{anyhow, anyhow::bail};
@@ -88,9 +89,17 @@ enum Commands {
         #[arg(long)]
         font_dir: Option<String>,
 
+        /// Operate offline
+        #[arg(long = "offline", action=ArgAction::SetTrue)]
+        is_offline: Option<bool>,
+
         /// Allowed base URL for external data requests. Default allows any base URL
         #[arg(short, long)]
         allowed_base_url: Option<Vec<String>>,
+
+        /// Allowed base filepath for external data requests. Default allows no datadirs
+        #[arg(long = "datadir")]
+        allowed_base_datadir: Option<Vec<String>>,
 
         /// d3-format locale name or file with .json extension
         #[arg(long)]
@@ -140,9 +149,17 @@ enum Commands {
         #[arg(long)]
         font_dir: Option<String>,
 
+        /// Operate offline
+        #[arg(long = "offline", action=ArgAction::SetTrue)]
+        is_offline: Option<bool>,
+
         /// Allowed base URL for external data requests. Default allows any base URL
         #[arg(short, long)]
         allowed_base_url: Option<Vec<String>>,
+
+        /// Allowed base filepath for external data requests. Default allows no datadirs
+        #[arg(long = "datadir")]
+        allowed_base_datadir: Option<Vec<String>>,
 
         /// d3-format locale name or file with .json extension
         #[arg(long)]
@@ -192,9 +209,17 @@ enum Commands {
         #[arg(long)]
         font_dir: Option<String>,
 
+        /// Operate offline
+        #[arg(long = "offline", action=ArgAction::SetTrue)]
+        is_offline: Option<bool>,
+
         /// Allowed base URL for external data requests. Default allows any base URL
         #[arg(short, long)]
         allowed_base_url: Option<Vec<String>>,
+
+        /// Allowed base filepath for external data requests. Default allows no datadirs
+        #[arg(long = "datadir")]
+        allowed_base_datadir: Option<Vec<String>>,
 
         /// d3-format locale name or file with .json extension
         #[arg(long)]
@@ -236,9 +261,17 @@ enum Commands {
         #[arg(long)]
         font_dir: Option<String>,
 
+        /// Operate offline
+        #[arg(long = "offline", action=ArgAction::SetTrue)]
+        is_offline: Option<bool>,
+
         /// Allowed base URL for external data requests. Default allows any base URL
         #[arg(short, long)]
         allowed_base_url: Option<Vec<String>>,
+
+        /// Allowed base filepath for external data requests. Default allows no datadirs
+        #[arg(long = "datadir")]
+        allowed_base_datadir: Option<Vec<String>>,
 
         /// d3-format locale name or file with .json extension
         #[arg(long)]
@@ -317,9 +350,17 @@ enum Commands {
         #[arg(long)]
         font_dir: Option<String>,
 
+        /// Operate offline
+        #[arg(long = "offline", action=ArgAction::SetTrue)]
+        is_offline: Option<bool>,
+
         /// Allowed base URL for external data requests. Default allows any base URL
         #[arg(short, long)]
         allowed_base_url: Option<Vec<String>>,
+
+        /// Allowed base filepath for external data requests. Default allows no datadirs
+        #[arg(long = "datadir")]
+        allowed_base_datadir: Option<Vec<String>>,
 
         /// d3-format locale name or file with .json extension
         #[arg(long)]
@@ -353,9 +394,17 @@ enum Commands {
         #[arg(long)]
         font_dir: Option<String>,
 
+        /// Operate offline
+        #[arg(long = "offline", action=ArgAction::SetTrue)]
+        is_offline: Option<bool>,
+
         /// Allowed base URL for external data requests. Default allows any base URL
         #[arg(short, long)]
         allowed_base_url: Option<Vec<String>>,
+
+        /// Allowed base filepath for external data requests. Default allows no datadirs
+        #[arg(long = "datadir")]
+        allowed_base_datadir: Option<Vec<String>>,
 
         /// d3-format locale name or file with .json extension
         #[arg(long)]
@@ -389,9 +438,17 @@ enum Commands {
         #[arg(long)]
         font_dir: Option<String>,
 
+        /// Operate offline
+        #[arg(long = "offline", action=ArgAction::SetTrue)]
+        is_offline: Option<bool>,
+
         /// Allowed base URL for external data requests. Default allows any base URL
         #[arg(short, long)]
         allowed_base_url: Option<Vec<String>>,
+
+        /// Allowed base filepath for external data requests. Default allows no datadirs
+        #[arg(long = "datadir")]
+        allowed_base_datadir: Option<Vec<String>>,
 
         /// d3-format locale name or file with .json extension
         #[arg(long)]
@@ -417,9 +474,17 @@ enum Commands {
         #[arg(long)]
         font_dir: Option<String>,
 
+        /// Operate offline
+        #[arg(long = "offline", action=ArgAction::SetTrue)]
+        is_offline: Option<bool>,
+
         /// Allowed base URL for external data requests. Default allows any base URL
         #[arg(short, long)]
         allowed_base_url: Option<Vec<String>>,
+
+        /// Allowed base filepath for external data requests. Default allows no datadirs
+        #[arg(long = "datadir")]
+        allowed_base_datadir: Option<Vec<String>>,
 
         /// d3-format locale name or file with .json extension
         #[arg(long)]
@@ -579,7 +644,9 @@ async fn main() -> Result<(), anyhow::Error> {
             config,
             show_warnings,
             font_dir,
+            is_offline,
             allowed_base_url,
+            allowed_base_datadir,
             format_locale,
             time_format_locale,
         } => {
@@ -591,7 +658,9 @@ async fn main() -> Result<(), anyhow::Error> {
                 theme,
                 config,
                 show_warnings,
+                is_offline,
                 allowed_base_url,
+                allowed_base_datadir,
                 format_locale,
                 time_format_locale,
             )
@@ -607,7 +676,9 @@ async fn main() -> Result<(), anyhow::Error> {
             ppi,
             show_warnings,
             font_dir,
+            is_offline,
             allowed_base_url,
+            allowed_base_datadir,
             format_locale,
             time_format_locale,
         } => {
@@ -621,7 +692,9 @@ async fn main() -> Result<(), anyhow::Error> {
                 scale,
                 ppi,
                 show_warnings,
+                is_offline,
                 allowed_base_url,
+                allowed_base_datadir,
                 format_locale,
                 time_format_locale,
             )
@@ -637,7 +710,9 @@ async fn main() -> Result<(), anyhow::Error> {
             quality,
             show_warnings,
             font_dir,
+            is_offline,
             allowed_base_url,
+            allowed_base_datadir,
             format_locale,
             time_format_locale,
         } => {
@@ -651,7 +726,9 @@ async fn main() -> Result<(), anyhow::Error> {
                 scale,
                 quality,
                 show_warnings,
+                is_offline,
                 allowed_base_url,
+                allowed_base_datadir,
                 format_locale,
                 time_format_locale,
             )
@@ -665,7 +742,9 @@ async fn main() -> Result<(), anyhow::Error> {
             config,
             show_warnings,
             font_dir,
+            is_offline,
             allowed_base_url,
+            allowed_base_datadir,
             format_locale,
             time_format_locale,
         } => {
@@ -677,7 +756,9 @@ async fn main() -> Result<(), anyhow::Error> {
                 theme,
                 config,
                 show_warnings,
+                is_offline,
                 allowed_base_url,
+                allowed_base_datadir,
                 format_locale,
                 time_format_locale,
             )
@@ -724,7 +805,6 @@ async fn main() -> Result<(), anyhow::Error> {
                         theme,
                         vl_version,
                         show_warnings: false,
-                        allowed_base_urls: None,
                         format_locale,
                         time_format_locale,
                     },
@@ -738,7 +818,9 @@ async fn main() -> Result<(), anyhow::Error> {
             input,
             output,
             font_dir,
+            is_offline,
             allowed_base_url,
+            allowed_base_datadir,
             format_locale,
             time_format_locale,
         } => {
@@ -746,7 +828,9 @@ async fn main() -> Result<(), anyhow::Error> {
             vg_2_svg(
                 &input,
                 &output,
+                is_offline,
                 allowed_base_url,
+                allowed_base_datadir,
                 format_locale,
                 time_format_locale,
             )
@@ -758,7 +842,9 @@ async fn main() -> Result<(), anyhow::Error> {
             scale,
             ppi,
             font_dir,
+            is_offline,
             allowed_base_url,
+            allowed_base_datadir,
             format_locale,
             time_format_locale,
         } => {
@@ -768,7 +854,9 @@ async fn main() -> Result<(), anyhow::Error> {
                 &output,
                 scale,
                 ppi,
+                is_offline,
                 allowed_base_url,
+                allowed_base_datadir,
                 format_locale,
                 time_format_locale,
             )
@@ -780,7 +868,9 @@ async fn main() -> Result<(), anyhow::Error> {
             scale,
             quality,
             font_dir,
+            is_offline,
             allowed_base_url,
+            allowed_base_datadir,
             format_locale,
             time_format_locale,
         } => {
@@ -790,7 +880,9 @@ async fn main() -> Result<(), anyhow::Error> {
                 &output,
                 scale,
                 quality,
+                is_offline,
                 allowed_base_url,
+                allowed_base_datadir,
                 format_locale,
                 time_format_locale,
             )
@@ -800,7 +892,9 @@ async fn main() -> Result<(), anyhow::Error> {
             input,
             output,
             font_dir,
+            is_offline,
             allowed_base_url,
+            allowed_base_datadir,
             format_locale,
             time_format_locale,
         } => {
@@ -808,7 +902,9 @@ async fn main() -> Result<(), anyhow::Error> {
             vg_2_pdf(
                 &input,
                 &output,
+                is_offline,
                 allowed_base_url,
+                allowed_base_datadir,
                 format_locale,
                 time_format_locale,
             )
@@ -848,7 +944,6 @@ async fn main() -> Result<(), anyhow::Error> {
                 .vega_to_html(
                     vg_spec,
                     VgOpts {
-                        allowed_base_urls: None,
                         format_locale,
                         time_format_locale,
                     },
@@ -1033,10 +1128,10 @@ async fn vl_2_vg(
                 theme,
                 config,
                 show_warnings,
-                allowed_base_urls: None,
                 format_locale: None,
                 time_format_locale: None,
             },
+            Default::default(),
         )
         .await
     {
@@ -1069,7 +1164,9 @@ async fn vl_2_vg(
 async fn vg_2_svg(
     input: &str,
     output: &str,
+    is_offline: Option<bool>,
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<String>,
     time_format_locale: Option<String>,
 ) -> Result<(), anyhow::Error> {
@@ -1089,6 +1186,16 @@ async fn vg_2_svg(
         Some(p) => Some(time_format_locale_from_str(p)?),
     };
 
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
+
     // Initialize converter
     let mut converter = VlConverter::new();
 
@@ -1097,10 +1204,10 @@ async fn vg_2_svg(
         .vega_to_svg(
             vg_spec,
             VgOpts {
-                allowed_base_urls,
                 format_locale,
                 time_format_locale,
             },
+            dl_options,
         )
         .await
     {
@@ -1116,12 +1223,15 @@ async fn vg_2_svg(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn vg_2_png(
     input: &str,
     output: &str,
     scale: f32,
     ppi: f32,
+    is_offline: Option<bool>,
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<String>,
     time_format_locale: Option<String>,
 ) -> Result<(), anyhow::Error> {
@@ -1141,6 +1251,16 @@ async fn vg_2_png(
         Some(p) => Some(time_format_locale_from_str(p)?),
     };
 
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
+
     // Initialize converter
     let mut converter = VlConverter::new();
 
@@ -1149,10 +1269,10 @@ async fn vg_2_png(
         .vega_to_png(
             vg_spec,
             VgOpts {
-                allowed_base_urls,
                 format_locale,
                 time_format_locale,
             },
+            dl_options,
             Some(scale),
             Some(ppi),
         )
@@ -1170,12 +1290,15 @@ async fn vg_2_png(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn vg_2_jpeg(
     input: &str,
     output: &str,
     scale: f32,
     quality: u8,
+    is_offline: Option<bool>,
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<String>,
     time_format_locale: Option<String>,
 ) -> Result<(), anyhow::Error> {
@@ -1194,6 +1317,15 @@ async fn vg_2_jpeg(
         None => None,
         Some(p) => Some(time_format_locale_from_str(p)?),
     };
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
 
     // Initialize converter
     let mut converter = VlConverter::new();
@@ -1203,10 +1335,10 @@ async fn vg_2_jpeg(
         .vega_to_jpeg(
             vg_spec,
             VgOpts {
-                allowed_base_urls,
                 format_locale,
                 time_format_locale,
             },
+            dl_options,
             Some(scale),
             Some(quality),
         )
@@ -1227,7 +1359,9 @@ async fn vg_2_jpeg(
 async fn vg_2_pdf(
     input: &str,
     output: &str,
+    is_offline: Option<bool>,
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<String>,
     time_format_locale: Option<String>,
 ) -> Result<(), anyhow::Error> {
@@ -1247,6 +1381,16 @@ async fn vg_2_pdf(
         Some(p) => Some(time_format_locale_from_str(p)?),
     };
 
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
+
     // Initialize converter
     let mut converter = VlConverter::new();
 
@@ -1255,10 +1399,10 @@ async fn vg_2_pdf(
         .vega_to_pdf(
             vg_spec,
             VgOpts {
-                allowed_base_urls,
                 format_locale,
                 time_format_locale,
             },
+            dl_options,
         )
         .await
     {
@@ -1282,7 +1426,9 @@ async fn vl_2_svg(
     theme: Option<String>,
     config: Option<String>,
     show_warnings: bool,
+    is_offline: Option<bool>,
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<String>,
     time_format_locale: Option<String>,
 ) -> Result<(), anyhow::Error> {
@@ -1308,6 +1454,16 @@ async fn vl_2_svg(
         Some(p) => Some(time_format_locale_from_str(p)?),
     };
 
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
+
     // Initialize converter
     let mut converter = VlConverter::new();
 
@@ -1320,10 +1476,10 @@ async fn vl_2_svg(
                 config,
                 theme,
                 show_warnings,
-                allowed_base_urls,
                 format_locale,
                 time_format_locale,
             },
+            dl_options,
         )
         .await
     {
@@ -1349,7 +1505,9 @@ async fn vl_2_png(
     scale: f32,
     ppi: f32,
     show_warnings: bool,
+    is_offline: Option<bool>,
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<String>,
     time_format_locale: Option<String>,
 ) -> Result<(), anyhow::Error> {
@@ -1375,6 +1533,16 @@ async fn vl_2_png(
         Some(p) => Some(time_format_locale_from_str(p)?),
     };
 
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
+
     // Initialize converter
     let mut converter = VlConverter::new();
 
@@ -1387,10 +1555,10 @@ async fn vl_2_png(
                 config,
                 theme,
                 show_warnings,
-                allowed_base_urls,
                 format_locale,
                 time_format_locale,
             },
+            dl_options,
             Some(scale),
             Some(ppi),
         )
@@ -1418,7 +1586,9 @@ async fn vl_2_jpeg(
     scale: f32,
     quality: u8,
     show_warnings: bool,
+    is_offline: Option<bool>,
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<String>,
     time_format_locale: Option<String>,
 ) -> Result<(), anyhow::Error> {
@@ -1444,6 +1614,16 @@ async fn vl_2_jpeg(
         Some(p) => Some(time_format_locale_from_str(p)?),
     };
 
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
+
     // Initialize converter
     let mut converter = VlConverter::new();
 
@@ -1456,10 +1636,10 @@ async fn vl_2_jpeg(
                 config,
                 theme,
                 show_warnings,
-                allowed_base_urls,
                 format_locale,
                 time_format_locale,
             },
+            dl_options,
             Some(scale),
             Some(quality),
         )
@@ -1485,7 +1665,9 @@ async fn vl_2_pdf(
     theme: Option<String>,
     config: Option<String>,
     show_warnings: bool,
+    is_offline: Option<bool>,
     allowed_base_urls: Option<Vec<String>>,
+    allowed_base_datadirs: Option<Vec<String>>,
     format_locale: Option<String>,
     time_format_locale: Option<String>,
 ) -> Result<(), anyhow::Error> {
@@ -1511,6 +1693,16 @@ async fn vl_2_pdf(
         Some(p) => Some(time_format_locale_from_str(p)?),
     };
 
+    let mut dl_options = DataLoadingOptions {
+        has_network_access: !(is_offline.unwrap_or(false)),
+        allowed_base_urls: allowed_base_urls.unwrap_or_default(),
+        ..Default::default()
+    };
+    if let Some(allowed_base_datadirs) = allowed_base_datadirs {
+        dl_options.has_file_access = true;
+        dl_options.parse_and_set_allowed_base_datadirs(allowed_base_datadirs);
+    }
+
     // Initialize converter
     let mut converter = VlConverter::new();
 
@@ -1523,10 +1715,10 @@ async fn vl_2_pdf(
                 config,
                 theme,
                 show_warnings,
-                allowed_base_urls,
                 format_locale,
                 time_format_locale,
             },
+            dl_options,
         )
         .await
     {
