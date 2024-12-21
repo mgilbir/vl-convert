@@ -317,7 +317,6 @@ mod test_vegalite_to_vega {
     fn test(
         #[values(
             VlVersion::v5_8,
-            VlVersion::v5_13,
             VlVersion::v5_14,
             VlVersion::v5_15,
             VlVersion::v5_16,
@@ -325,6 +324,7 @@ mod test_vegalite_to_vega {
             VlVersion::v5_18,
             VlVersion::v5_19,
             VlVersion::v5_20,
+            VlVersion::v5_21,
         )]
         vl_version: VlVersion,
 
@@ -363,7 +363,6 @@ mod test_vegalite_to_html_no_bundle {
     fn test(
         #[values(
             VlVersion::v5_8,
-            VlVersion::v5_13,
             VlVersion::v5_14,
             VlVersion::v5_15,
             VlVersion::v5_16,
@@ -371,6 +370,7 @@ mod test_vegalite_to_html_no_bundle {
             VlVersion::v5_18,
             VlVersion::v5_19,
             VlVersion::v5_20,
+            VlVersion::v5_21,
         )]
         vl_version: VlVersion,
 
@@ -411,7 +411,6 @@ mod test_vegalite_to_html_bundle {
     fn test(
         #[values(
             VlVersion::v5_8,
-            VlVersion::v5_13,
             VlVersion::v5_14,
             VlVersion::v5_15,
             VlVersion::v5_16,
@@ -419,6 +418,7 @@ mod test_vegalite_to_html_bundle {
             VlVersion::v5_18,
             VlVersion::v5_19,
             VlVersion::v5_20,
+            VlVersion::v5_21,
         )]
         vl_version: VlVersion,
 
